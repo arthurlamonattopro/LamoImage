@@ -1,26 +1,36 @@
 # LAMO Converter — GUI
 
 **Descrição**
-Conversor gráfico simples entre PNG e o formato proprietário `.lamo`. Inclui interface Tkinter para abrir, visualizar, converter e reconstruir imagens.
+Conversor gráfico para transformar PNG ↔ `.lamo`, o formato customizado que embala PNG comprimido + metadata dentro de um arquivo só. Interface leve em Tkinter, preview integrado e leitura/escrita completa do formato.
 
 ---
 
-## Recursos
+## 🔥 Download (Release)
 
-* Abrir e visualizar arquivos **PNG**.
-* Converter PNG → **.lamo** (formato custom: PNG comprimido + metadata).
-* Abrir **.lamo** e reconstruir/salvar como PNG.
-* Exibir metadata embutida no arquivo `.lamo`.
-* Interface gráfica leve (Tkinter) com preview e painel de metadata.
+Baixe a versão compilada aqui:
+👉 **Release V1:** [https://github.com/arthurlamonattopro/LamoImage/releases/tag/V1](https://github.com/arthurlamonattopro/LamoImage/releases/tag/V1)
+
+*(Se quiser rodar direto sem instalar Python. A interface é a mesma.)*
 
 ---
 
-## Requisitos
+## 📦 Recursos
 
-* Python 3.8+ (testado em 3.10/3.11)
-* Biblioteca Pillow
+* Abrir e visualizar **PNG**.
+* Converter PNG → **.lamo**.
+* Abrir `.lamo` e reconstruir a imagem original.
+* Exibir metadata completa do arquivo.
+* Preview com redimensionamento automático.
+* Estrutura binária documentada e fácil de expandir.
 
-Instale dependências:
+---
+
+## 🧩 Requisitos (para rodar via fonte)
+
+* Python 3.8+
+* Pillow
+
+Instalação:
 
 ```bash
 pip install pillow
@@ -28,100 +38,94 @@ pip install pillow
 
 ---
 
-## Como rodar
+## ▶️ Como rodar (versão fonte)
 
 ```bash
 python main.py
 ```
 
-A janela vai abrir: use os botões no topo para abrir/convertir e salvar.
-
 ---
 
-## Formato `.lamo` (resumo técnico)
+## 🧠 Estrutura do formato `.lamo`
 
-Estrutura binária do arquivo `.lamo`:
+Arquivo binário com:
 
-* 4 bytes: `MAGIC = b'LMGO'`
-* 1 byte: `VERSION` (atualmente `1`)
-* 4 bytes: tamanho do JSON de metadata (big-endian uint32)
-* N bytes: JSON de metadata (UTF-8)
-* 4 bytes: tamanho dos dados comprimidos (big-endian uint32)
-* M bytes: PNG original comprimido com `zlib`
+* `LMGO` — assinatura (4 bytes)
+* `1` — versão (1 byte)
+* Tamanho do JSON (4 bytes, big-endian)
+* Metadata (JSON UTF-8)
+* Tamanho dos dados comprimidos (4 bytes)
+* PNG comprimido (`zlib`)
 
-A metadata inclui, por padrão:
+Metadata mínima:
 
 ```json
 {
-  "width": <int>,
-  "height": <int>,
-  "mode": "<PIL mode>",
-  "inner_format": "PNG",
-  ... outros campos opcionais ...
+  "width": 1920,
+  "height": 1080,
+  "mode": "RGB",
+  "inner_format": "PNG"
 }
 ```
 
 ---
 
-## Funções principais do script
+## ✨ API interna (para devs)
 
-* `image_to_png_bytes(img: Image.Image) -> bytes` — converte PIL → bytes PNG.
-* `write_lamo(path: str, img: Image.Image, metadata: dict = None)` — grava `.lamo`.
-* `read_lamo(path: str) -> (Image, metadata)` — lê `.lamo` e retorna PIL.Image + metadata.
-* `convert_png_to_lamo(png_path: str, out_path: str = None)` — helper para conversão em lote/CLI.
-* `LamoApp` — classe Tkinter que implementa a GUI (abrir, visualizar, salvar, converter).
+* `write_lamo(path, img, metadata)` — cria `.lamo`.
+* `read_lamo(path)` — lê `.lamo` e retorna `(Image, metadata)`.
+* `convert_png_to_lamo(path)` — conversão rápida.
+* `LamoApp` — GUI inteira em Tkinter.
 
 ---
 
-## Uso rápido (exemplos)
+## 🧪 Exemplos de uso
 
-Converter pela GUI:
+Conversão programática:
 
-1. `python main.py`
-2. `Abrir PNG...` → `Converter PNG → .lamo` → escolha local para salvar.
+```python
+from main import write_lamo, convert_png_to_lamo
+convert_png_to_lamo("foto.png")
+```
 
-Converter via função (script/CLI/automação):
+Adicionar metadata manualmente:
 
 ```python
 from PIL import Image
-from main import write_lamo, convert_png_to_lamo
-
-# simples
-convert_png_to_lamo("exemplo.png")  # gera exemplo.lamo
-
-# com metadata extra
-img = Image.open("exemplo.png")
-write_lamo("saida.lamo", img, metadata={"autor": "Lamo", "desc": "Exemplo"})
+img = Image.open("foto.png")
+write_lamo("saida.lamo", img, {"autor": "Lamo", "descricao": "Teste"})
 ```
 
 ---
 
-## Erros comuns / Dicas
+## ⚠️ Problemas comuns
 
-* **"Formato não reconhecido (magic mismatch)"**: arquivo não é `.lamo` ou está corrompido.
-* Se `/` problemas de permissão ao salvar, execute com permissão correta ou escolha outro diretório.
-* Para imagens muito grandes, o preview redimensiona para caber na janela; a imagem original não é alterada.
-
----
-
-## Contribuindo
-
-Fork, ajuste e faça PRs. Algumas ideias:
-
-* Suporte a outros formatos internos (ex: WebP).
-* Compactação configurável (zlib level).
-* Suporte a lote (converter pastas inteiras).
-* Exportar metadata como JSON separado.
+* *"magic mismatch"* → arquivo não é `.lamo` ou está quebrado.
+* PNG gigante demora no preview → normal, Tkinter respira fundo antes de renderizar.
 
 ---
 
-## Licença
+## 🚀 Roadmap / sugestões
 
-Coloque a licença que preferir (MIT recomendada para projetos pequenos). Quer que eu adicione um `LICENSE` MIT já pronto?
+* Modo batch (converter pastas inteiras).
+* Compressão configurável.
+* Metadados editáveis pela interface.
+* Suporte WebP/JPEG interno.
 
 ---
 
-## Contato
+## 📄 Licença
 
-Criado por **Lamo** — use com parcimônia e senso estético.
-Precisa que eu traduza pro inglês, gere um pacote pip ou crie interface mais bonita com QT/Tkmodern?
+Escolha sua licença favorita. Posso gerar um MIT prontinho se quiser.
+
+---
+
+## 🤝 Contribuindo
+
+Fork, modifique e mande PR. O mundo `.lamo` cresce contigo.
+
+Se quiser, gero também:
+
+* um *logo* pro projeto,
+* um *README em inglês*,
+* ou um *instalador .exe* estiloso.
