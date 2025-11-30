@@ -118,5 +118,3 @@ write_lamo("saida.lamo", img, {"autor": "Lamo", "descricao": "Teste"})
 ## 🤝 Contribuindo
 
 Fork, modifique e mande PR. O mundo `.lamo` cresce contigo.
-
-Se quiser, gero também:
