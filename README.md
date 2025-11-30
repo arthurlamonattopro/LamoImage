@@ -113,11 +113,6 @@ write_lamo("saida.lamo", img, {"autor": "Lamo", "descricao": "Teste"})
 * Suporte WebP/JPEG interno.
 
 ---
-
-## 📄 Licença
-
-Escolha sua licença favorita. Posso gerar um MIT prontinho se quiser.
-
 ---
 
 ## 🤝 Contribuindo
@@ -125,7 +120,3 @@ Escolha sua licença favorita. Posso gerar um MIT prontinho se quiser.
 Fork, modifique e mande PR. O mundo `.lamo` cresce contigo.
 
 Se quiser, gero também:
-
-* um *logo* pro projeto,
-* um *README em inglês*,
-* ou um *instalador .exe* estiloso.
