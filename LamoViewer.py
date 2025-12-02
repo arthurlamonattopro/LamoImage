@@ -13,7 +13,14 @@ import zlib
 from io import BytesIO
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageFile
+
+# --- Configurações de Segurança ---
+# VULN-03: Limita o número máximo de pixels para evitar ataques de exaustão de memória (DoS)
+# 178956970 pixels é o limite padrão do Pillow (aprox. 178.9 MP)
+ImageFile.MAX_IMAGE_PIXELS = 178956970
+MAX_META_SIZE = 1024 * 1024  # 1MB para metadados JSON (VULN-02)
+MAX_DECOMPRESSED_SIZE = 100 * 1024 * 1024  # 100MB para dados de imagem (VULN-01)
 
 MAGIC = b'LMGO'
 VERSION = 1
@@ -27,12 +34,36 @@ def read_lamo(path: str):
         version = struct.unpack('!B', f.read(1))[0]
         if version != VERSION:
             raise ValueError(f'Versão incompatível: {version}')
+
+        # VULN-02: Checagem de tamanho para metadados JSON
         meta_len = struct.unpack('!I', f.read(4))[0]
+        if meta_len > MAX_META_SIZE:
+            raise ValueError(f'Tamanho de metadados excedido: {meta_len} bytes')
+
         meta_json = f.read(meta_len).decode('utf-8')
         metadata = json.loads(meta_json)
+
+        # VULN-01: Checagem de tamanho para dados comprimidos
         data_len = struct.unpack('!I', f.read(4))[0]
+        if data_len > MAX_DECOMPRESSED_SIZE: # Usando o mesmo limite como um proxy
+            raise ValueError(f'Tamanho de dados comprimidos excedido: {data_len} bytes')
+
         compressed = f.read(data_len)
-        png_bytes = zlib.decompress(compressed)
+
+        # VULN-01: Descompressão segura com limite de tamanho
+        dobj = zlib.decompressobj()
+        png_bytes = b''
+        decompressed_size = 0
+
+        # Descomprime em blocos para checar o tamanho total
+        for chunk in [compressed[i:i + 1024] for i in range(0, len(compressed), 1024)]:
+            png_bytes += dobj.decompress(chunk)
+            decompressed_size = len(png_bytes)
+            if decompressed_size > MAX_DECOMPRESSED_SIZE:
+                raise ValueError('Tamanho de dados descompactados excedido (Compression Bomb)')
+
+        png_bytes += dobj.flush()
+
     bio = BytesIO(png_bytes)
     img = Image.open(bio)
     img.load()
@@ -144,6 +175,7 @@ class LamoViewer(tk.Tk):
             if path.lower().endswith('.lamo'):
                 pil, meta = read_lamo(path)
             else:
+                # VULN-03: ImageFile.MAX_IMAGE_PIXELS já está configurado globalmente
                 pil = Image.open(path)
                 pil.load()
             self.pil_image = pil
@@ -152,7 +184,9 @@ class LamoViewer(tk.Tk):
             self._refresh()
             self.update_info(f'[{self.index+1}/{len(self.files)}] {os.path.basename(path)} — {pil.width}x{pil.height}')
         except Exception as e:
-            messagebox.showerror('Erro', f'Falha ao abrir: {e}')
+            # VULN-04: Tratamento de erro seguro - não expõe detalhes internos da exceção
+            print(f"Erro ao carregar {path}: {e}") # Log interno para debug
+            messagebox.showerror('Erro', 'Falha ao abrir o arquivo. O arquivo pode estar corrompido ou o formato não é suportado.')
 
     def _refresh(self):
         if not self.pil_image:

@@ -12,7 +12,13 @@ import os
 from io import BytesIO
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageFile
+
+# --- Configurações de Segurança ---
+# VULN-02: Limita o número máximo de pixels para evitar ataques de exaustão de memória (DoS)
+ImageFile.MAX_IMAGE_PIXELS = 178956970
+MAX_META_SIZE = 1024 * 1024  # 1MB para metadados JSON (VULN-03)
+MAX_DECOMPRESSED_SIZE = 100 * 1024 * 1024  # 100MB para dados de imagem (VULN-01)
 
 # --- formato ---
 MAGIC = b'LMGO'
@@ -35,7 +41,12 @@ def write_lamo(path: str, img: Image.Image, metadata: dict = None):
     meta.setdefault("mode", img.mode)
     # tenta pegar formato original se existir
     meta.setdefault("inner_format", getattr(img, "format", "PNG") or "PNG")
+
     meta_json = json.dumps(meta, ensure_ascii=False).encode('utf-8')
+
+    # VULN-03: Checagem de tamanho para metadados JSON (embora seja gerado internamente, é uma boa prática)
+    if len(meta_json) > MAX_META_SIZE:
+        raise ValueError(f'Tamanho de metadados gerados excedido: {len(meta_json)} bytes')
 
     with open(path, 'wb') as f:
         f.write(MAGIC)
@@ -54,15 +65,38 @@ def read_lamo(path: str):
         if version != VERSION:
             raise ValueError(f"Versão incompatível: {version}")
 
+        # VULN-03: Checagem de tamanho para metadados JSON
         meta_len = struct.unpack('!I', f.read(4))[0]
+        if meta_len > MAX_META_SIZE:
+            raise ValueError(f'Tamanho de metadados excedido: {meta_len} bytes')
+
         meta_json = f.read(meta_len).decode('utf-8')
         metadata = json.loads(meta_json)
 
+        # VULN-01: Checagem de tamanho para dados comprimidos
         data_len = struct.unpack('!I', f.read(4))[0]
+        if data_len > MAX_DECOMPRESSED_SIZE: # Usando o mesmo limite como um proxy
+            raise ValueError(f'Tamanho de dados comprimidos excedido: {data_len} bytes')
+
         compressed = f.read(data_len)
-        png_bytes = zlib.decompress(compressed)
+
+        # VULN-01: Descompressão segura com limite de tamanho
+        dobj = zlib.decompressobj()
+        png_bytes = b''
+        decompressed_size = 0
+
+        # Descomprime em blocos para checar o tamanho total
+        # Nota: O tamanho do chunk é arbitrário, mas 1024 é um bom ponto de partida.
+        for chunk in [compressed[i:i + 1024] for i in range(0, len(compressed), 1024)]:
+            png_bytes += dobj.decompress(chunk)
+            decompressed_size = len(png_bytes)
+            if decompressed_size > MAX_DECOMPRESSED_SIZE:
+                raise ValueError('Tamanho de dados descompactados excedido (Compression Bomb)')
+
+        png_bytes += dobj.flush()
 
     bio = BytesIO(png_bytes)
+    # VULN-02: ImageFile.MAX_IMAGE_PIXELS já está configurado globalmente
     img = Image.open(bio)
     img.load()
     # Depois de reconstruir, define format para PNG (conteúdo interno)
@@ -71,8 +105,16 @@ def read_lamo(path: str):
 
 # --- utilidades ---
 def convert_file_to_lamo(input_path: str, out_path: str = None):
+    # VULN-05: Garantir que o caminho de saída não permita Path Traversal
     if not out_path:
-        out_path = os.path.splitext(input_path)[0] + ".lamo"
+        # Usa apenas o nome do arquivo de entrada para construir o nome de saída
+        base_name = os.path.basename(input_path)
+        # Remove a extensão original e adiciona .lamo
+        file_name_without_ext = os.path.splitext(base_name)[0]
+        # Assume que o arquivo de saída deve ser criado no diretório atual
+        out_path = file_name_without_ext + ".lamo"
+
+    # VULN-02: ImageFile.MAX_IMAGE_PIXELS já está configurado globalmente
     img = Image.open(input_path)
     # garante carregamento (evita lazy load issues)
     img.load()
@@ -153,10 +195,13 @@ class LamoApp(tk.Tk):
         if not path:
             return
         try:
+            # VULN-02: ImageFile.MAX_IMAGE_PIXELS já está configurado globalmente
             img = Image.open(path)
             img.load()
         except Exception as e:
-            messagebox.showerror("Erro", f"Não foi possível abrir a imagem: {e}")
+            # VULN-04: Tratamento de erro seguro
+            print(f"Erro ao abrir imagem: {e}") # Log interno para debug
+            messagebox.showerror("Erro", "Não foi possível abrir a imagem. O arquivo pode estar corrompido ou o formato não é suportado.")
             return
 
         # metadata base
@@ -174,9 +219,12 @@ class LamoApp(tk.Tk):
         if not path:
             return
         try:
+            # VULN-01, VULN-02, VULN-03: read_lamo já está corrigido
             img, meta = read_lamo(path)
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao ler .lamo: {e}")
+            # VULN-04: Tratamento de erro seguro
+            print(f"Erro ao ler .lamo: {e}") # Log interno para debug
+            messagebox.showerror("Erro", "Falha ao ler .lamo. O arquivo pode estar corrompido ou ser malicioso.")
             return
         # marca que veio de um .lamo
         meta = meta or {}
@@ -189,6 +237,8 @@ class LamoApp(tk.Tk):
         if not self.current_image:
             messagebox.showwarning("Aviso", "Carrega uma imagem primeiro (Abrir IMAGEM...)")
             return
+
+        # O filedialog.asksaveasfilename já garante que o usuário está salvando em um local seguro
         out = filedialog.asksaveasfilename(defaultextension=".lamo", filetypes=[("LAMO", "*.lamo")], title="Salvar como .lamo", initialfile="saida.lamo")
         if not out:
             return
@@ -197,9 +247,12 @@ class LamoApp(tk.Tk):
             meta = self.current_meta.copy() if self.current_meta else {}
             meta.setdefault("source", os.path.basename(self.current_path) if self.current_path else "current_image")
             meta.setdefault("orig_format", getattr(self.current_image, "format", None))
+            # write_lamo já tem checagem de tamanho de metadados
             write_lamo(out, self.current_image, metadata=meta)
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao escrever .lamo: {e}")
+            # VULN-04: Tratamento de erro seguro
+            print(f"Erro ao escrever .lamo: {e}") # Log interno para debug
+            messagebox.showerror("Erro", "Falha ao escrever .lamo. Verifique as permissões ou o espaço em disco.")
             return
         messagebox.showinfo("Pronto", f"Arquivo salvo: {out}")
         self.current_path = out
@@ -215,7 +268,9 @@ class LamoApp(tk.Tk):
         try:
             self.current_image.save(out, format="PNG")
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao salvar PNG: {e}")
+            # VULN-04: Tratamento de erro seguro
+            print(f"Erro ao salvar PNG: {e}") # Log interno para debug
+            messagebox.showerror("Erro", "Falha ao salvar PNG. Verifique as permissões ou o espaço em disco.")
             return
         messagebox.showinfo("Pronto", f"PNG salvo: {out}")
 
@@ -231,6 +286,7 @@ class LamoApp(tk.Tk):
         self.preview_label.configure(image=self.tk_image)
 
         # mostra metadata formatada
+        self.meta_text.config(state=tk.NORMAL)
         pretty = json.dumps(self.current_meta, indent=2, ensure_ascii=False)
         self.meta_text.delete("1.0", tk.END)
         self.meta_text.insert(tk.END, pretty)
@@ -240,7 +296,9 @@ class LamoApp(tk.Tk):
         self.current_meta = None
         self.tk_image = None
         self.preview_label.configure(image='')
+        self.meta_text.config(state=tk.NORMAL)
         self.meta_text.delete("1.0", tk.END)
+        self.meta_text.config(state=tk.DISABLED)
         self.path_var.set("Nenhum arquivo carregado")
         self.current_path = None
 
