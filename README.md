@@ -110,7 +110,7 @@ write_lamo("saida.lamo", img, {"autor": "Lamo", "descricao": "Teste"})
 * Modo batch (converter pastas inteiras).
 * Compressão configurável.
 * Metadados editáveis pela interface.
-* Suporte WebP/JPEG interno.
+* <del>Suporte WebP/JPEG interno.</del>
 
 ---
 ---
