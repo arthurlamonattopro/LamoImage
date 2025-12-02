@@ -8,7 +8,7 @@ Conversor gráfico para transformar PNG ↔ `.lamo`, o formato customizado que e
 ## 🔥 Download (Release)
 
 Baixe a versão compilada aqui:
-👉 **Release V2:** [https://github.com/arthurlamonattopro/LamoImage/releases/tag/V3](https://github.com/arthurlamonattopro/LamoImage/releases/tag/V3)
+👉 **Release V3:** [https://github.com/arthurlamonattopro/LamoImage/releases/tag/V3](https://github.com/arthurlamonattopro/LamoImage/releases/tag/V3)
 
 *(Se quiser rodar direto sem instalar Python. A interface é a mesma.)*
 
