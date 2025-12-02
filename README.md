@@ -17,7 +17,7 @@ Baixe a versão compilada aqui:
 ## 📦 Recursos
 
 * Abrir e visualizar **PNG**.
-* Converter PNG → **.lamo**.
+* Converter images(png, jpg, webp) → **.lamo**.
 * Abrir `.lamo` e reconstruir a imagem original.
 * Exibir metadata completa do arquivo.
 * Preview com redimensionamento automático.
