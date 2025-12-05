@@ -1,7 +1,7 @@
 """
 LAMO Converter - GUI
-Requisitos: Pillow
-Instalação: pip install pillow
+Requisitos: Pillow, cryptography
+Instalação: pip install pillow cryptography
 Roda: python conversor.py
 """
 
@@ -11,8 +11,12 @@ import struct
 import os
 from io import BytesIO
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, simpledialog
 from PIL import Image, ImageTk, ImageFile
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from base64 import urlsafe_b64encode, urlsafe_b64decode
 
 # --- Configurações de Segurança ---
 # VULN-02: Limita o número máximo de pixels para evitar ataques de exaustão de memória (DoS)
@@ -24,16 +28,61 @@ MAX_DECOMPRESSED_SIZE = 100 * 1024 * 1024  # 100MB para dados de imagem (VULN-01
 MAGIC = b'LMGO'
 VERSION = 1
 
+# --- funções de criptografia ---
+def derive_key(password: str, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=480000, # Recomendado pelo OWASP
+    )
+    key = urlsafe_b64encode(kdf.derive(password.encode()))
+    return key
+
+def encrypt_data(data: bytes, password: str, salt: bytes) -> bytes:
+    key = derive_key(password, salt)
+    f = Fernet(key)
+    return f.encrypt(data)
+
+def decrypt_data(data: bytes, password: str, salt: bytes) -> bytes:
+    key = derive_key(password, salt)
+    f = Fernet(key)
+    return f.decrypt(data)
+
 # --- funções de I/O do formato LAMO ---
-def image_to_png_bytes(img: Image.Image) -> bytes:
+def image_to_png_bytes(img: Image.Image, quality: int = 95) -> bytes:
     bio = BytesIO()
-    # Sempre salvamos o conteúdo interno como PNG (formato do payload)
+    # Salvamos o conteúdo interno como PNG (formato do payload)
+    # A compressão PNG é lossless, mas a qualidade do JPEG/WEBP original é mantida
+    # O parâmetro 'compress_level' do PNG controla a compressão, mas não a qualidade visual.
+    # Para simular o controle de qualidade, vamos salvar como JPEG temporariamente se a qualidade for menor que 95,
+    # e depois converter para PNG. Isso é uma simplificação, mas funciona para o propósito.
+    # No entanto, o formato LAMO usa PNG comprimido com zlib, que é lossless.
+    # Para controlar a "qualidade" da imagem final, o melhor é controlar a qualidade da imagem ANTES de salvar como PNG.
+    # Como o objetivo é controlar a compressão, vamos usar o compress_level do PNG.
+    # Mas para o usuário, "qualidade" é mais intuitivo. Vamos manter o PNG lossless e usar o zlib_level.
+    
+    # O zlib.compress já usa compressão nível 9 por padrão.
+    # Para dar controle ao usuário, vamos usar o parâmetro 'quality' para o nível de compressão zlib.
+    # No entanto, a função image_to_png_bytes só deve gerar os bytes PNG.
+    # A compressão zlib é feita em write_lamo.
+    
+    # Vamos manter a função image_to_png_bytes simples e lossless.
     img.save(bio, format='PNG')
     return bio.getvalue()
 
-def write_lamo(path: str, img: Image.Image, metadata: dict = None):
+def write_lamo(path: str, img: Image.Image, metadata: dict = None, password: str = None, zlib_level: int = 9):
     png_bytes = image_to_png_bytes(img)
-    compressed = zlib.compress(png_bytes)
+    
+    # Compressão ZLIB com nível ajustável
+    compressed = zlib.compress(png_bytes, level=zlib_level)
+
+    salt = None
+    if password:
+        salt = os.urandom(16)
+        compressed = encrypt_data(compressed, password, salt)
+        meta.setdefault("encrypted", True)
+        meta.setdefault("salt", urlsafe_b64encode(salt).decode('utf-8'))
 
     meta = metadata.copy() if metadata else {}
     meta.setdefault("width", img.width)
@@ -41,6 +90,7 @@ def write_lamo(path: str, img: Image.Image, metadata: dict = None):
     meta.setdefault("mode", img.mode)
     # tenta pegar formato original se existir
     meta.setdefault("inner_format", getattr(img, "format", "PNG") or "PNG")
+    meta.setdefault("zlib_level", zlib_level) # Salva o nível de compressão
 
     meta_json = json.dumps(meta, ensure_ascii=False).encode('utf-8')
 
@@ -56,7 +106,7 @@ def write_lamo(path: str, img: Image.Image, metadata: dict = None):
         f.write(struct.pack('!I', len(compressed)))
         f.write(compressed)
 
-def read_lamo(path: str):
+def read_lamo(path: str, parent=None):
     with open(path, 'rb') as f:
         magic = f.read(4)
         if magic != MAGIC:
@@ -79,6 +129,19 @@ def read_lamo(path: str):
             raise ValueError(f'Tamanho de dados comprimidos excedido: {data_len} bytes')
 
         compressed = f.read(data_len)
+
+        # --- Descriptografia (se necessário) ---
+        if metadata.get("encrypted"):
+            password = simpledialog.askstring("Senha", "O arquivo .lamo está criptografado. Digite a senha:", show='*', parent=parent)
+            if not password:
+                raise ValueError("Operação cancelada. Senha necessária para descriptografar.")
+            
+            salt = urlsafe_b64decode(metadata.get("salt").encode('utf-8'))
+            
+            try:
+                compressed = decrypt_data(compressed, password, salt)
+            except Exception as e:
+                raise ValueError(f"Falha na descriptografia. Senha incorreta ou arquivo corrompido: {e}")
 
         # VULN-01: Descompressão segura com limite de tamanho
         dobj = zlib.decompressobj()
@@ -104,7 +167,7 @@ def read_lamo(path: str):
     return img, metadata
 
 # --- utilidades ---
-def convert_file_to_lamo(input_path: str, out_path: str = None):
+def convert_file_to_lamo(input_path: str, out_path: str = None, zlib_level: int = 9):
     # VULN-05: Garantir que o caminho de saída não permita Path Traversal
     if not out_path:
         # Usa apenas o nome do arquivo de entrada para construir o nome de saída
@@ -118,17 +181,17 @@ def convert_file_to_lamo(input_path: str, out_path: str = None):
     img = Image.open(input_path)
     # garante carregamento (evita lazy load issues)
     img.load()
-    write_lamo(out_path, img, metadata={"source": os.path.basename(input_path), "orig_format": getattr(img, "format", None)})
+    write_lamo(out_path, img, metadata={"source": os.path.basename(input_path), "orig_format": getattr(img, "format", None)}, zlib_level=zlib_level)
     return out_path
 
-def convert_png_to_lamo(png_path: str, out_path: str = None):
-    return convert_file_to_lamo(png_path, out_path)
+def convert_png_to_lamo(png_path: str, out_path: str = None, zlib_level: int = 9):
+    return convert_file_to_lamo(png_path, out_path, zlib_level)
 
-def convert_jpg_to_lamo(jpg_path: str, out_path: str = None):
-    return convert_file_to_lamo(jpg_path, out_path)
+def convert_jpg_to_lamo(jpg_path: str, out_path: str = None, zlib_level: int = 9):
+    return convert_file_to_lamo(jpg_path, out_path, zlib_level)
 
-def convert_webp_to_lamo(webp_path: str, out_path: str = None):
-    return convert_file_to_lamo(webp_path, out_path)
+def convert_webp_to_lamo(webp_path: str, out_path: str = None, zlib_level: int = 9):
+    return convert_file_to_lamo(webp_path, out_path, zlib_level)
 
 # --- GUI ---
 class LamoApp(tk.Tk):
@@ -142,6 +205,9 @@ class LamoApp(tk.Tk):
         self.tk_image = None           # ImageTk.PhotoImage
         self.current_meta = None
         self.current_path = None
+        self.password_var = tk.StringVar()
+        self.encrypt_var = tk.BooleanVar()
+        self.zlib_level_var = tk.IntVar(value=9) # Nível de compressão ZLIB (0-9)
         self.create_widgets()
 
     def create_widgets(self):
@@ -157,6 +223,18 @@ class LamoApp(tk.Tk):
 
         # Top buttons
         ttk.Button(top, text="Abrir IMAGEM...", command=self.open_image).pack(side=tk.LEFT, padx=4)
+        
+        # Campos de criptografia
+        ttk.Checkbutton(top, text="Criptografar", variable=self.encrypt_var).pack(side=tk.LEFT, padx=4)
+        ttk.Label(top, text="Senha:").pack(side=tk.LEFT, padx=2)
+        ttk.Entry(top, textvariable=self.password_var, show="*", width=15).pack(side=tk.LEFT, padx=4)
+        
+        # Controle de compressão
+        ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+        ttk.Label(top, text="Compressão (0-9):").pack(side=tk.LEFT, padx=2)
+        self.zlib_level_spinbox = tk.Spinbox(top, from_=0, to=9, textvariable=self.zlib_level_var, width=3)
+        self.zlib_level_spinbox.pack(side=tk.LEFT, padx=4)
+
         ttk.Button(top, text="Converter imagem atual → .lamo", command=self.convert_current_image).pack(side=tk.LEFT, padx=4)
         ttk.Separator(top, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
         ttk.Button(top, text="Abrir .lamo...", command=self.open_lamo).pack(side=tk.LEFT, padx=4)
@@ -220,7 +298,7 @@ class LamoApp(tk.Tk):
             return
         try:
             # VULN-01, VULN-02, VULN-03: read_lamo já está corrigido
-            img, meta = read_lamo(path)
+            img, meta = read_lamo(path, parent=self)
         except Exception as e:
             # VULN-04: Tratamento de erro seguro
             print(f"Erro ao ler .lamo: {e}") # Log interno para debug
@@ -247,8 +325,16 @@ class LamoApp(tk.Tk):
             meta = self.current_meta.copy() if self.current_meta else {}
             meta.setdefault("source", os.path.basename(self.current_path) if self.current_path else "current_image")
             meta.setdefault("orig_format", getattr(self.current_image, "format", None))
+            
+            password = self.password_var.get() if self.encrypt_var.get() else None
+            if self.encrypt_var.get() and not password:
+                messagebox.showerror("Erro", "A criptografia está ativada, mas a senha está vazia.")
+                return
+            
+            zlib_level = self.zlib_level_var.get()
+            
             # write_lamo já tem checagem de tamanho de metadados
-            write_lamo(out, self.current_image, metadata=meta)
+            write_lamo(out, self.current_image, metadata=meta, password=password, zlib_level=zlib_level)
         except Exception as e:
             # VULN-04: Tratamento de erro seguro
             print(f"Erro ao escrever .lamo: {e}") # Log interno para debug

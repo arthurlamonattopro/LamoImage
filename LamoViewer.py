@@ -1,8 +1,8 @@
 """
 LAMO Viewer
 Um visualizador simples para arquivos .lamo (e imagens comuns) semelhante ao Fotos do Windows.
-Requisitos: Pillow
-Instalação: pip install pillow
+Requisitos: Pillow, cryptography
+Instalação: pip install pillow cryptography
 Roda: python lamo_viewer.py
 """
 
@@ -12,8 +12,12 @@ import json
 import zlib
 from io import BytesIO
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk, ImageFile
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from base64 import urlsafe_b64encode, urlsafe_b64decode
 
 # --- Configurações de Segurança ---
 # VULN-03: Limita o número máximo de pixels para evitar ataques de exaustão de memória (DoS)
@@ -25,8 +29,24 @@ MAX_DECOMPRESSED_SIZE = 100 * 1024 * 1024  # 100MB para dados de imagem (VULN-01
 MAGIC = b'LMGO'
 VERSION = 1
 
+# --- funções de criptografia ---
+def derive_key(password: str, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=480000, # Recomendado pelo OWASP
+    )
+    key = urlsafe_b64encode(kdf.derive(password.encode()))
+    return key
+
+def decrypt_data(data: bytes, password: str, salt: bytes) -> bytes:
+    key = derive_key(password, salt)
+    f = Fernet(key)
+    return f.decrypt(data)
+
 # --- leitura do formato .lamo ---
-def read_lamo(path: str):
+def read_lamo(path: str, parent=None):
     with open(path, 'rb') as f:
         magic = f.read(4)
         if magic != MAGIC:
@@ -49,6 +69,19 @@ def read_lamo(path: str):
             raise ValueError(f'Tamanho de dados comprimidos excedido: {data_len} bytes')
 
         compressed = f.read(data_len)
+
+        # --- Descriptografia (se necessário) ---
+        if metadata.get("encrypted"):
+            password = simpledialog.askstring("Senha", "O arquivo .lamo está criptografado. Digite a senha:", show='*', parent=parent)
+            if not password:
+                raise ValueError("Operação cancelada. Senha necessária para descriptografar.")
+            
+            salt = urlsafe_b64decode(metadata.get("salt").encode('utf-8'))
+            
+            try:
+                compressed = decrypt_data(compressed, password, salt)
+            except Exception as e:
+                raise ValueError(f"Falha na descriptografia. Senha incorreta ou arquivo corrompido: {e}")
 
         # VULN-01: Descompressão segura com limite de tamanho
         dobj = zlib.decompressobj()
@@ -173,7 +206,7 @@ class LamoViewer(tk.Tk):
         path = self.files[self.index]
         try:
             if path.lower().endswith('.lamo'):
-                pil, meta = read_lamo(path)
+                pil, meta = read_lamo(path, parent=self)
             else:
                 # VULN-03: ImageFile.MAX_IMAGE_PIXELS já está configurado globalmente
                 pil = Image.open(path)
