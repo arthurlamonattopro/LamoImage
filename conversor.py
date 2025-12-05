@@ -4,6 +4,10 @@ Requisitos: Pillow, cryptography
 Instalação: pip install pillow cryptography
 Roda: python conversor.py
 """
+DARK_BG = '#2e2e2e'
+DARK_FG = '#ffffff'
+DARK_ACTIVE = '#4a4a4a'
+DARK_BORDER = '#1e1e1e'
 
 import json
 import zlib
@@ -200,6 +204,32 @@ class LamoApp(tk.Tk):
         self.title("LAMO Converter")
         self.geometry("900x600")
         self.resizable(True, True)
+        
+        # --- Configuração do Tema Escuro ---
+        style = ttk.Style(self)
+        style.theme_use('clam') # Um tema base mais moderno
+        
+        self.configure(bg=DARK_BG)
+        
+        # Configuração geral do estilo
+        style.configure('.', background=DARK_BG, foreground=DARK_FG, bordercolor=DARK_BORDER)
+        style.configure('TFrame', background=DARK_BG)
+        style.configure('TLabel', background=DARK_BG, foreground=DARK_FG)
+        style.configure('TButton', background=DARK_BG, foreground=DARK_FG)
+        style.map('TButton', background=[('active', DARK_ACTIVE)])
+        style.configure('TCheckbutton', background=DARK_BG, foreground=DARK_FG)
+        style.configure('TLabelFrame', background=DARK_BG, foreground=DARK_FG)
+        style.configure('TLabelFrame.Label', background=DARK_BG, foreground=DARK_FG)
+        
+        # Configuração de elementos que não são ttk (tk.Text, tk.Entry, tk.Spinbox)
+        self.option_add('*Text.background', DARK_BG)
+        self.option_add('*Text.foreground', DARK_FG)
+        self.option_add('*Entry.background', DARK_ACTIVE)
+        self.option_add('*Entry.foreground', DARK_FG)
+        self.option_add('*Spinbox.background', DARK_ACTIVE)
+        self.option_add('*Spinbox.foreground', DARK_FG)
+        
+        # --- Fim da Configuração do Tema Escuro ---
 
         self.current_image = None      # PIL.Image
         self.tk_image = None           # ImageTk.PhotoImage
@@ -252,7 +282,8 @@ class LamoApp(tk.Tk):
         self.preview_label.pack(fill=tk.BOTH, expand=True)
 
         # Metadata text
-        self.meta_text = tk.Text(meta_frame, width=40, wrap=tk.WORD)
+        # Usando cores do tema escuro para o widget Text
+        self.meta_text = tk.Text(meta_frame, width=40, wrap=tk.WORD, bg=DARK_BG, fg=DARK_FG, insertbackground=DARK_FG)
         self.meta_text.pack(fill=tk.BOTH, expand=True)
 
         # Bottom: info and path

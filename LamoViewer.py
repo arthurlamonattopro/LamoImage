@@ -12,7 +12,7 @@ import json
 import zlib
 from io import BytesIO
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from PIL import Image, ImageTk, ImageFile
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -109,7 +109,34 @@ class LamoViewer(tk.Tk):
         super().__init__()
         self.title('LAMO Viewer')
         self.geometry('1000x700')
-        self.configure(bg='black')
+        
+        # --- Configuração do Tema Escuro ---
+        style = ttk.Style(self)
+        style.theme_use('clam') # Um tema base mais moderno
+        
+        # Cores para o tema escuro
+        DARK_BG = '#2e2e2e'
+        DARK_FG = '#ffffff'
+        DARK_ACTIVE = '#4a4a4a'
+        DARK_BORDER = '#1e1e1e'
+        
+        self.configure(bg=DARK_BG)
+        
+        # Configuração geral do estilo
+        style.configure('.', background=DARK_BG, foreground=DARK_FG, bordercolor=DARK_BORDER)
+        style.configure('TFrame', background=DARK_BG)
+        style.configure('TLabel', background=DARK_BG, foreground=DARK_FG)
+        style.configure('TButton', background=DARK_BG, foreground=DARK_FG)
+        style.map('TButton', background=[('active', DARK_ACTIVE)])
+        style.configure('TMenu', background=DARK_BG, foreground=DARK_FG)
+        
+        # Configuração do Menu (tk.Menu não usa ttk.Style diretamente, mas tentamos)
+        self.option_add('*Menu.background', DARK_BG)
+        self.option_add('*Menu.foreground', DARK_FG)
+        self.option_add('*Menu.activeBackground', DARK_ACTIVE)
+        self.option_add('*Menu.activeForeground', DARK_FG)
+        
+        # --- Fim da Configuração do Tema Escuro ---
 
         # estado
         self.files = []            # lista de caminhos
@@ -122,7 +149,8 @@ class LamoViewer(tk.Tk):
         self.slideshow_delay = 3000  # ms
 
         # UI
-        self.canvas = tk.Canvas(self, bg='black', highlightthickness=0)
+        # O canvas deve usar a cor de fundo escura
+        self.canvas = tk.Canvas(self, bg=DARK_BG, highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
         # binds
@@ -162,7 +190,8 @@ class LamoViewer(tk.Tk):
 
         # info overlay
         self.info_var = tk.StringVar()
-        self.info_text = self.canvas.create_text(10, 10, anchor='nw', text='', fill='white', font=('Segoe UI', 10))
+        # O texto deve usar a cor de primeiro plano escura
+        self.info_text = self.canvas.create_text(10, 10, anchor='nw', text='', fill=DARK_FG, font=('Segoe UI', 10))
 
         # inicial
         self.update_info('Pronto — abra um .lamo ou uma pasta')
